@@ -66,28 +66,28 @@ Invoke-Editor
 #>
 function Invoke-Editor {
     Param(
-        [Parameter(Mandatory=$true,ParameterSetName="names",Position=1)]
-        [string[]]$Path = $null,
+        [Parameter(Mandatory=$true,ParameterSetName="names",Position=0,ValueFromPipeline)]
+        [string[]]$Path,
         [Parameter(Mandatory=$true,ParameterSetName="pipeline",ValueFromPipeline)]
-        [System.IO.FileSystemInfo[]]$Paths = $null
+        [System.IO.FileSystemInfo[]]$Paths
     )
     DynamicParam {
         $ParameterName = "Editor"
         # Create the dictionary
         $RuntimeParameterDictionary = New-Object System.Management.Automation.RuntimeDefinedParameterDictionary
-        
+
         # Create the collection of attributes
         $AttributeCollection = New-Object System.Collections.ObjectModel.Collection[System.Attribute]
         # Create and set the parameters' attributes
-        $ParameterAttribute = New-Object System.Management.Automation.ParameterAttribute
-        $ParameterAttribute.Mandatory = $false
-        $ParameterAttribute.Position = 0
-        $ParameterAttribute.ParameterSetName = "noname"
-        
-        #Add the attributes to the attributes collection
-        $AttributeCollection.Add($ParameterAttribute)
 
-        $arrSet = [string[]]($Script:__CONFIG.Editors.Keys | Sort)
+        # this can appear in all parameter sets
+        @("names","nonames","pipeline") | ForEach-Object {
+            $p = New-Object System.Management.Automation.ParameterAttribute
+            $P.ParameterSetName = $_
+            $AttributeCollection.Add($p)
+        }
+
+        $arrSet = [string[]]($Script:__CONFIG.Editors.Keys | Sort-Object)
         if ($arrSet -ieq $null) {
             $arrSet = @()
         }
@@ -110,10 +110,18 @@ function Invoke-Editor {
 
     Process {
         if ($PSCmdlet.ParameterSetName -ieq "pipeline") {
-            $Paths | ForEach-Object { Start-Process $editorPath -ArgumentList $_.FullName } 
+            if ($_.GetType() -eq [string]) {
+                $path = $_
+            }
+            else {
+                $path = $_.FullName
+            }
+            Start-Process $editorPath -ArgumentList "`"${path}`""
         }
         else {
-             $Path | Start-Process $editorPath -ArgumentList $file
+            $Path | ForEach-Object {
+                Start-Process $editorPath -ArgumentList $_
+            }
         }
     }
 }
@@ -184,7 +192,7 @@ function Add-Editor {
         if ($e.IsDefault) {
             setDefault -name $e.Name
         }
-    
+
         $Script:__CONFIG.Editors[$Name] = $e
         persist
         Write-Output $e
@@ -234,7 +242,7 @@ function Get-Editor {
         $ParameterName = "Editor"
         # Create the dictionary
         $RuntimeParameterDictionary = New-Object System.Management.Automation.RuntimeDefinedParameterDictionary
-        
+
         # Create the collection of attributes
         $AttributeCollection = New-Object System.Collections.ObjectModel.Collection[System.Attribute]
         # Create and set the parameters' attributes
@@ -243,11 +251,11 @@ function Get-Editor {
         $ParameterAttribute.ValueFromPipelineByPropertyName = $true
         $ParameterAttribute.ParameterSetName = "noname"
         $ParameterAttribute.Position = 0
-        
+
         #Add the attributes to the attributes collection
         $AttributeCollection.Add($ParameterAttribute)
 
-        $arrSet = [string[]]($Script:__CONFIG.Editors.Keys | Sort)
+        $arrSet = [string[]]($Script:__CONFIG.Editors.Keys | Sort-Object)
         if ($arrSet -ieq $null) {
             $arrSet = @()
         }
@@ -268,16 +276,15 @@ function Get-Editor {
             Write-Output $Script:__CONFIG.Editors[$Script:__CONFIG.Default]
             return
         }
-        
+
         if (![String]::IsNullOrEmpty($Editor)) {
               Write-Output $Script:__CONFIG.Editors[$Editor]
           }
           else {
-              $Script:__CONFIG.Editors.Values | % {
+              $Script:__CONFIG.Editors.Values | ForEach-Object {
                   Write-Output $_
                }
           }
- 
     }
 }
 
@@ -308,7 +315,7 @@ PS> Remove-Editor VSCode
 Remove-Editor
 #>
 function Remove-Editor {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     Param(
         [Parameter(Mandatory,ValueFromPipeline,ParameterSetName="pipeline")]
         [Editor]$ObjEditor
@@ -317,7 +324,7 @@ function Remove-Editor {
         $ParameterName = "Editor"
         # Create the dictionary
         $RuntimeParameterDictionary = New-Object System.Management.Automation.RuntimeDefinedParameterDictionary
-        
+
         # Create the collection of attributes
         $AttributeCollection = New-Object System.Collections.ObjectModel.Collection[System.Attribute]
         # Create and set the parameters' attributes
@@ -326,11 +333,11 @@ function Remove-Editor {
         $ParameterAttribute.ValueFromPipelineByPropertyName = $true
         $ParameterAttribute.ParameterSetName = "name"
         $ParameterAttribute.Position = 0
-        
+
         #Add the attributes to the attributes collection
         $AttributeCollection.Add($ParameterAttribute)
 
-        $arrSet = [string[]]($Script:__CONFIG.Editors.Keys | Sort)
+        $arrSet = [string[]]($Script:__CONFIG.Editors.Keys | Sort-Object )
         if ($arrSet -ieq $null) {
             $arrSet = @()
         }
@@ -351,6 +358,10 @@ function Remove-Editor {
             "pipeline" { $Script:__CONFIG.Editors.Remove($ObjEditor.Name) }
             "name" { $Script:__CONFIG.Editors.Remove($Editor) }
         }
+    }
+
+    End {
+        persist
     }
 }
 
@@ -380,15 +391,15 @@ PS> Get-Editor notepad | Set-Editor -Default
 Set-Editor
 #>
 function Set-Editor {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     Param(
         [Parameter(Mandatory,ValueFromPipeline,ParameterSetName="pipeline")]
         [Editor]$Editor,
         [Parameter(Mandatory)]
         [switch]$Default
     )
-    
-    setDefault -name $Editor.Name
+    $name = $Editor.Name
+    setDefault -name $name
     persist
 }
 
@@ -410,18 +421,18 @@ function load {
        "${env:ProgramFiles}\Notepad++\notepad++.exe",
        "${env:ProgramFiles(x86)}\Notepad++\notepad++.exe"
     )
-    
+
     foreach ($path in $nppPaths) {
         if (Test-Path -Path $path) {
             Add-Editor -Name "Notepad++" -Description "Notepad++, https://notepad-plus-plus.org/" -Path $path | Out-null
             break
         }
     }
-    
+
     $codePaths = @(
         "${env:LOCALAPPDATA}\Programs\Microsoft VS Code\bin\code.cmd"
     )
-    
+
     foreach ($path in $codePaths) {
         if (Test-Path -Path $path) {
             Add-Editor -Name "VSCode" -Description "Visual Studio Code, https://code.visualstudio.com/" -Path "code.cmd" | Out-Null
@@ -433,7 +444,7 @@ function load {
 }
 
 function persist {
-    $Script:__CONFIG | Export-Clixml -Depth 5 -Path $Script:__CONFIG_PATH
+    $Script:__CONFIG | Export-Clixml -Depth 5 -Path $Script:__CONFIG_PATH -Force
 }
 
 function setDefault([string]$name) {
